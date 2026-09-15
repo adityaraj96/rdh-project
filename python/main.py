@@ -1,6 +1,13 @@
+"""
+RDH Item Master — PyFlink job (DUMMY STREAM MODE).
+Hardened for AWS Managed Service for Apache Flink with Py4J and Logging Fixes.
+"""
 import json
 import random
 import time
+import os
+import sys
+import logging
 from datetime import datetime, timezone
 
 from pyflink.common import Types, Row
@@ -8,14 +15,17 @@ from pyflink.datastream import StreamExecutionEnvironment
 from pyflink.datastream.connectors import Sink
 from pyflink.java_gateway import get_gateway
 
+# Force logging to standard out so AWS CloudWatch captures it before any crash
+logging.basicConfig(stream=sys.stdout, level=logging.INFO, format="%(message)s")
+logger = logging.getLogger(__name__)
+
 # --------------------------------------------------------------------------- config
 def load_properties() -> dict:
-    """Safely loads AWS Runtime Properties without triggering local laptop overrides."""
     try:
         with open("/etc/flink/application_properties.json") as f:
             return {g["PropertyGroupId"]: g["PropertyMap"] for g in json.load(f)}
     except Exception as e:
-        print(f"Warning: Could not read properties file: {e}")
+        logger.warning(f"Could not read properties file: {e}")
         return {}
 
 # --------------------------------------------------------------------------- mapping
@@ -60,20 +70,31 @@ def couchbase_sink(cb_p: dict) -> Sink:
 
 # --------------------------------------------------------------------------- job
 def main():
-    # 1. Initialize safely (AWS injects the JAR automatically based on console settings)
-    props = load_properties()
-    cb_p = props.get("CouchbaseSink", {})
-    
-    env = StreamExecutionEnvironment.get_execution_environment()
+    try:
+        logger.info("Starting PyFlink Initialization...")
+        props = load_properties()
+        cb_p = props.get("CouchbaseSink", {})
+        
+        env = StreamExecutionEnvironment.get_execution_environment()
+        
+        # FIX 1: Dynamically find the JAR in the AWS temp directory and inject it into the Py4J Gateway
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        jar_path = f"file://{current_dir}/lib/rdh-couchbase-sink.jar"
+        env.add_jars(jar_path)
+        logger.info(f"Successfully added JAR to classpath: {jar_path}")
 
-    # 2. Generate dummy data safely using built-in Python collections
-    dummy_sequence = env.from_collection(list(range(1, 100000)), type_info=Types.INT())
-    mutations = dummy_sequence.flat_map(generate_dummy_sales, output_type=MUTATION_TYPE).name("dummy-sales-generator")
+        # FIX 2: Reduce the array size to 1,000 to prevent Akka RPC Frame payload crashes
+        dummy_sequence = env.from_collection(list(range(1, 1000)), type_info=Types.INT())
+        mutations = dummy_sequence.flat_map(generate_dummy_sales, output_type=MUTATION_TYPE).name("dummy-sales-generator")
 
-    # 3. Sink to Couchbase using the perfected Java connector
-    mutations.key_by(lambda row: row[1]).sink_to(couchbase_sink(cb_p)).name("couchbase-guarded-sink")
+        mutations.key_by(lambda row: row[1]).sink_to(couchbase_sink(cb_p)).name("couchbase-guarded-sink")
 
-    env.execute("rdh-dummy-sales")
+        logger.info("Executing Flink Job...")
+        env.execute("rdh-dummy-sales")
+        
+    except Exception as e:
+        logger.error(f"FATAL PYTHON CRASH: {str(e)}", exc_info=True)
+        raise
 
 if __name__ == "__main__":
-    main()
+    main() 

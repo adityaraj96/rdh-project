@@ -2,6 +2,7 @@ package com.smri.rdh.flink.couchbase;
 
 import org.apache.flink.api.connector.sink2.Sink;
 import org.apache.flink.api.connector.sink2.SinkWriter;
+import org.apache.flink.api.connector.sink2.WriterInitContext;
 import org.apache.flink.types.Row;
 
 public class CouchbaseGuardedSink implements Sink<Row> {
@@ -18,8 +19,7 @@ public class CouchbaseGuardedSink implements Sink<Row> {
     }
 
     @Override
-    @SuppressWarnings("deprecation")
-    public SinkWriter<Row> createWriter(InitContext context) {
+    public SinkWriter<Row> createWriter(WriterInitContext context) {
         return new CouchbaseGuardedSinkWriter(
                 config, context.getProcessingTimeService(), context.metricGroup());
     }

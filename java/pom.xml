@@ -1,4 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Builds ONE uber JAR that the PyFlink job loads on Amazon Managed Service for Apache Flink:
+    - our Couchbase guarded sink
+    - Couchbase Java SDK (+ Reactor)
+    - Flink Kafka connector (+ optional MSK IAM auth)
+  Flink core itself is "provided" (the managed runtime already has it).
+-->
 <project xmlns="http://maven.apache.org/POM/4.0.0"
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
@@ -10,15 +17,20 @@
   <packaging>jar</packaging>
 
   <properties>
+    <!-- Match the Flink runtime version you select in Managed Flink -->
     <flink.version>1.20.0</flink.version>
+    <!-- Kafka connector is released separately: <connector-version>-<flink-minor> -->
     <flink.kafka.connector.version>3.3.0-1.20</flink.kafka.connector.version>
+    <!-- Use the latest Couchbase Java SDK 3.x available to you -->
     <couchbase.java.client.version>3.7.9</couchbase.java.client.version>
     <msk.iam.auth.version>2.2.0</msk.iam.auth.version>
+    <!-- Managed Flink 1.20 runs on Java 11 -->
     <maven.compiler.release>11</maven.compiler.release>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
   </properties>
 
   <dependencies>
+    <!-- Provided by the Flink runtime: do NOT bundle -->
     <dependency>
       <groupId>org.apache.flink</groupId>
       <artifactId>flink-streaming-java</artifactId>
@@ -32,6 +44,7 @@
       <scope>provided</scope>
     </dependency>
 
+    <!-- Bundled -->
     <dependency>
       <groupId>com.couchbase.client</groupId>
       <artifactId>java-client</artifactId>
@@ -42,6 +55,7 @@
       <artifactId>flink-connector-kafka</artifactId>
       <version>${flink.kafka.connector.version}</version>
     </dependency>
+    <!-- Only needed if MSK uses IAM auth -->
     <dependency>
       <groupId>software.amazon.msk</groupId>
       <artifactId>aws-msk-iam-auth</artifactId>
@@ -58,6 +72,13 @@
   <build>
     <finalName>rdh-couchbase-sink</finalName>
     <plugins>
+      <!-- ADDED MAVEN COMPILER PLUGIN TO FIX CLOUDSHELL ERROR -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <version>3.11.0</version>
+      </plugin>
+
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-shade-plugin</artifactId>
@@ -87,6 +108,7 @@
                 </filter>
               </filters>
               <transformers>
+                <!-- Keeps Kafka / Couchbase service-loader files intact -->
                 <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
               </transformers>
             </configuration>

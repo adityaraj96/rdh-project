@@ -1,18 +1,13 @@
-"""
-RDH Item Master — PyFlink job (DUMMY STREAM MODE).
-
-Generates dummy sales data continuously and sinks it to Couchbase Capella 
-using the Java Uber JAR. Kafka/MSK is temporarily bypassed for testing.
-"""
 import json
 import os
 import time
 import random
 from datetime import datetime, timezone
 
-from pyflink.common import Configuration, Row, Types
+from pyflink.common import Configuration, Row, Types, WatermarkStrategy
 from pyflink.datastream import StreamExecutionEnvironment
 from pyflink.datastream.connectors import Sink
+from pyflink.datastream.connectors.number_seq import NumberSequenceSource
 from pyflink.java_gateway import get_gateway
 
 APP_PROPERTIES_FILE = "/etc/flink/application_properties.json"
@@ -26,23 +21,16 @@ def load_properties() -> dict:
         return {g["PropertyGroupId"]: g["PropertyMap"] for g in json.load(f)}
 
 # --------------------------------------------------------------------------- mapping
-# The exact Row shape the Java sink expects
 MUTATION_TYPE = Types.ROW_NAMED(
     ["op", "doc_key", "section", "payload", "event_ts"],
     [Types.STRING(), Types.STRING(), Types.STRING(), Types.STRING(), Types.LONG()],
 )
 
 def generate_dummy_sales(seq_num: int):
-    """
-    Acts as a dummy CDC stream. Receives a sequence number and yields a Couchbase mutation.
-    """
-    time.sleep(0.5)  # Throttle generation to ~2 records per second per Flink worker
-    
-    # Pick a random SKU to update
+    time.sleep(0.5) 
     skus = ["SKU-101", "SKU-205", "SKU-999", "SKU-404"]
     sku = random.choice(skus)
     
-    # Generate dummy sales payload
     sales_data = {
         "order_id": f"ORD-{seq_num}",
         "store_id": random.randint(1, 50),
@@ -53,11 +41,10 @@ def generate_dummy_sales(seq_num: int):
     
     now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
 
-    # Yield the Row exactly as the Java Sink expects it
     yield Row(
         "UPSERT", 
         f"ITEM::{sku}", 
-        "sales",                                         # This will become the "sales" section in Couchbase
+        "sales", 
         json.dumps(sales_data, separators=(",", ":")), 
         now_ms
     )
@@ -97,13 +84,12 @@ def main():
         env.add_jars(f"file://{jar}")
         env.enable_checkpointing(10_000)
 
-    # 1. Create a dummy infinite stream (generating numbers 1 to 1,000,000)
-    dummy_sequence = env.from_sequence(1, 1_000_000)
+    # THE FIX: Using PyFlink's native NumberSequenceSource connector
+    seq_source = NumberSequenceSource(1, 1_000_000)
+    dummy_sequence = env.from_source(seq_source, WatermarkStrategy.no_watermarks(), "seq-source")
 
-    # 2. Map the sequence numbers into Dummy Sales rows
     mutations = dummy_sequence.flat_map(generate_dummy_sales, output_type=MUTATION_TYPE).name("dummy-sales-generator")
 
-    # 3. Sink to Couchbase (using the same perfected key_by logic)
     mutations.key_by(lambda row: row.getField(1)) \
              .sink_to(couchbase_sink(cb_p)) \
              .name("couchbase-guarded-sink")

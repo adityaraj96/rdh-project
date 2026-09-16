@@ -3,21 +3,17 @@ import random
 import time
 import os
 import sys
+import logging
 from datetime import datetime, timezone
 
 from pyflink.common import Types, Row
 from pyflink.datastream import StreamExecutionEnvironment
 
-# Tech Lead Fix: Explicit opt-in for local mode. 
-# Prevents AWS from accidentally triggering local logic due to slow volume mounts.
+logging.basicConfig(stream=sys.stdout, level=logging.INFO, format="%(message)s")
+logger = logging.getLogger(__name__)
+
 IS_LOCAL = os.environ.get("FLINK_ENV") == "local"
 APP_PROPERTIES_FILE = "/etc/flink/application_properties.json"
-
-def load_properties() -> dict:
-    if IS_LOCAL or not os.path.isfile(APP_PROPERTIES_FILE):
-        return {}
-    with open(APP_PROPERTIES_FILE) as f:
-        return {g["PropertyGroupId"]: g["PropertyMap"] for g in json.load(f)}
 
 def generate_dummy_sales(seq_num: int):
     time.sleep(0.5) 
@@ -28,33 +24,32 @@ def generate_dummy_sales(seq_num: int):
         "currency": "INR"
     }
     now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
-    yield Row(sku, json.dumps(sales_data, separators=(",", ":")), now_ms)
+    
+    payload = json.dumps(sales_data, separators=(",", ":"))
+    logger.info(f"GENERATED_RECORD:: SKU={sku} PAYLOAD={payload}")
+    
+    yield Row(sku, payload, now_ms)
 
 def main():
     try:
         env = StreamExecutionEnvironment.get_execution_environment()
         
         if IS_LOCAL:
-            # Tech Lead Fix: Checkpointing is ONLY enabled locally. 
-            # On AWS, the orchestrator handles this natively.
             env.enable_checkpointing(10000)
         
-        # 1. Generate 100 records
         dummy_sequence = env.from_collection(list(range(1, 100)), type_info=Types.INT())
         
-        # 2. Map to Dummy Sales
         mutations = dummy_sequence.flat_map(
             generate_dummy_sales, 
             output_type=Types.ROW([Types.STRING(), Types.STRING(), Types.LONG()])
         ).name("dummy-sales-generator")
         
-        # 3. Print Sink (Outputs to CloudWatch TaskManager logs)
         mutations.print().name("print-sink")
         
         env.execute("rdh-pure-dummy-test")
 
     except Exception as e:
-        print(f"\n--- CRITICAL INITIALIZATION ERROR ---\n{e}", file=sys.stderr)
+        logger.error(f"CRITICAL INITIALIZATION ERROR: {e}", exc_info=True)
         raise
 
 if __name__ == "__main__":

@@ -1,0 +1,35 @@
+[
+  {
+    "PropertyGroupId": "kinesis.analytics.flink.run.options",
+    "PropertyMap": {
+      "python": "app/main.py",
+      "jarfile": "app/lib/pyflink-dependencies.jar",
+      "pyFiles": "app/lib/python-deps.zip"
+    }
+  },
+  {
+    "PropertyGroupId": "KafkaSource",
+    "PropertyMap": {
+      "bootstrap.servers": "b-1.smretail-msk.xxxxxx.c2.kafka.ap-southeast-1.amazonaws.com:9098",
+      "topic": "qlik.db2.item_master",
+      "group.id": "flink-couchbase-ods",
+      "security.protocol": "SASL_SSL",
+      "sasl.mechanism": "AWS_MSK_IAM",
+      "sasl.jaas.config": "software.amazon.msk.auth.iam.IAMLoginModule required;",
+      "sasl.client.callback.handler.class": "software.amazon.msk.auth.iam.IAMClientCallbackHandler"
+    }
+  },
+  {
+    "PropertyGroupId": "CouchbaseSink",
+    "PropertyMap": {
+      "connection_string": "couchbases://cb.xxxxxxxx.cloud.couchbase.com",
+      "username": "flink_ods_writer",
+      "password": "<cluster access credential - use AWS Secrets Manager in production>",
+      "bucket": "ods",
+      "scope": "retail",
+      "collection": "item_master",
+      "id_field": "item_number",
+      "durability": "none"
+    }
+  }
+]
